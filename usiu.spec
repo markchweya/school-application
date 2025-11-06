@@ -1,20 +1,26 @@
 # usiu.spec
-# Build with: pyinstaller usiu.spec
+# Build with:  pyinstaller usiu.spec
 
+import os
 from PyInstaller.utils.hooks import collect_submodules
 from kivy_deps import sdl2, glew
+
+# Attempt to import angle (Windows only)
 try:
-    # angle is Windows-only
     from kivy_deps import angle
     angle_bins = angle.dep_bins
 except Exception:
     angle_bins = []
 
-hidden = []
-# KivyMD can lazy load many submodules; include them all to avoid missing imports
-hidden += collect_submodules('kivymd')
-# (Optional) if you import other dynamic modules, add them here:
-# hidden += collect_submodules('your_pkg')
+# Collect all kivymd submodules to prevent import errors
+hiddenimports = collect_submodules('kivymd')
+
+# Handle icon paths safely
+icon_path = 'assets/usiu.ico'
+icns_path = 'assets/usiu.icns'
+
+icon_arg = icon_path if os.path.isfile(icon_path) else None
+icns_arg = icns_path if os.path.isfile(icns_path) else None
 
 block_cipher = None
 
@@ -23,22 +29,23 @@ a = Analysis(
     pathex=[],
     binaries=[],
     datas=[
-        ('assets', 'assets'),  # bundle your assets folder
+        ('assets', 'assets'),  # Include your assets folder
     ],
-    hiddenimports=hidden,
+    hiddenimports=hiddenimports,
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
     excludes=[],
-    noarchive=False
+    noarchive=False,
 )
 
-# Add Kivy native deps (DLLs / dylibs)
-for p in (sdl2.dep_bins + glew.dep_bins + angle_bins):
-    a.binaries.append((p.split('/')[-1], p, 'BINARY'))
+# Include Kivy native binaries (SDL2, GLEW, ANGLE)
+for dep in (sdl2.dep_bins + glew.dep_bins + angle_bins):
+    a.binaries.append((os.path.basename(dep), dep, 'BINARY'))
 
 pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
 
+# ===== Build EXE (Windows) =====
 exe = EXE(
     pyz,
     a.scripts,
@@ -49,10 +56,11 @@ exe = EXE(
     bootloader_ignore_signals=False,
     strip=False,
     upx=False,
-    console=False,            # no console window
-    icon='assets/usiu.ico'    # on macOS this is ignored; see BUNDLE below
+    console=False,              # No console window
+    icon=icon_arg,              # Optional Windows icon
 )
 
+# ===== Collect all files into dist folder =====
 coll = COLLECT(
     exe,
     a.binaries,
@@ -61,12 +69,13 @@ coll = COLLECT(
     strip=False,
     upx=False,
     upx_exclude=[],
-    name='USIU Africa'
+    name='USIU Africa',
 )
 
+# ===== macOS app bundle =====
 app = BUNDLE(
     coll,
     name='USIU Africa.app',
-    icon='assets/usiu.icns',  # macOS app icon
+    icon=icns_arg,              # Optional macOS icon
     bundle_identifier='ke.usiu.africa.login',
 )
