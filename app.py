@@ -11,7 +11,6 @@ from kivy.animation import Animation
 from kivy.uix.widget import Widget
 from kivy.metrics import dp
 from kivy.uix.screenmanager import ScreenManager, FadeTransition
-from kivy.factory import Factory
 
 from kivymd.app import MDApp
 from kivymd.uix.screen import MDScreen
@@ -30,6 +29,7 @@ from kivymd.uix.list import (
 from kivymd.uix.boxlayout import MDBoxLayout
 from kivymd.uix.label import MDLabel, MDIcon
 from kivymd.uix.selectioncontrol import MDCheckbox
+from kivymd.uix.scrollview import MDScrollView
 from kivymd.uix.menu import MDDropdownMenu
 
 
@@ -40,7 +40,7 @@ class UICircleProgress(Widget):
     progress = NumericProperty(0.0)
     ring_color = ColorProperty([0.54, 0.64, 1.0, 1.0])
     bg_color = ColorProperty([1, 1, 1, 0.10])
-    thickness = NumericProperty(dp(16))  # thicker for visibility
+    thickness = NumericProperty(dp(16))
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -49,12 +49,11 @@ class UICircleProgress(Widget):
     def _redraw(self, *_):
         self.canvas.clear()
         from kivy.graphics import Color, Ellipse, Line
-
         with self.canvas:
-            # soft drop shadow
+            # soft shadow
             Color(0, 0, 0, 0.25)
             Ellipse(pos=(self.x + dp(3), self.y - dp(3)), size=(self.width, self.height))
-            # outer plate
+            # plate
             Color(1, 1, 1, 0.10)
             Ellipse(pos=self.pos, size=self.size)
             # inner bevel
@@ -64,7 +63,7 @@ class UICircleProgress(Widget):
             Color(*self.bg_color)
             Line(circle=(self.center_x, self.center_y, min(self.size)/2 - self.thickness/2, 0, 360),
                  width=self.thickness, cap="round")
-            # foreground progress
+            # progress arc
             Color(*self.ring_color)
             Line(circle=(self.center_x, self.center_y, min(self.size)/2 - self.thickness/2, -90,
                          -90 + 360 * max(0.0, min(1.0, self.progress))),
@@ -81,7 +80,7 @@ KV = """
     padding: dp(16)
     ripple_behavior: True
 
-<LoginScreen@MDScreen>:
+<LoginScreen>:
     name: "login"
     canvas.before:
         Color:
@@ -127,7 +126,7 @@ KV = """
 
                 MDBoxLayout:
                     orientation: "vertical"
-                    spacing: dp(14)
+                    spacing: dp(16)
 
                     MDLabel:
                         text: "Login"
@@ -146,11 +145,10 @@ KV = """
                         font_size: "14sp"
                         size_hint_y: None
                         height: self.texture_size[1]
-                        padding_x: dp(4)
                     MDTextField:
                         id: email
                         mode: "outlined"
-                        hint_text: "name@usiu.ac.ke"
+                        hint_text: "admin@usiu.ac.ke"
                         icon_right: "email-outline"
                         size_hint_y: None
                         height: dp(56)
@@ -167,7 +165,6 @@ KV = """
                         font_size: "14sp"
                         size_hint_y: None
                         height: self.texture_size[1]
-                        padding_x: dp(4)
                     MDTextField:
                         id: pwd
                         mode: "outlined"
@@ -223,14 +220,14 @@ KV = """
             size_hint_y: None
             height: self.texture_size[1] + dp(6)
 
-<AdminScreen@MDScreen>:
+<AdminScreen>:
     name: "admin"
 
     MDBoxLayout:
         orientation: "vertical"
         spacing: 0
 
-        # ---- Header ----
+        # Header
         MDBoxLayout:
             id: header_bar
             size_hint_y: None
@@ -253,7 +250,7 @@ KV = """
                 text_color: 1,1,1,.95
                 on_release: app.open_profile_menu(self)
 
-        # ---- Content ----
+        # Content
         MDBoxLayout:
             id: content_row
             padding: dp(16)
@@ -273,58 +270,29 @@ KV = """
                 width: min(dp(380), root.width*.40)
                 spacing: dp(12)
 
-                # ----- Tasks Summary Card -----
+                # Section title
+                MDLabel:
+                    id: tasks_section_title
+                    text: "My Tasks"
+                    theme_text_color: "Custom"
+                    text_color: 1,1,1,.98
+                    size_hint_y: None
+                    height: self.texture_size[1]
+                    bold: True
+                    font_size: "18sp"
+
+                # Summary card
                 GlassCard:
                     id: card_tasks
                     orientation: "vertical"
                     padding: dp(18)
                     spacing: dp(10)
 
-                    # HEADER pinned to top
-                    MDBoxLayout:
-                        id: tasks_header
-                        size_hint_y: None
-                        height: dp(34)
-                        spacing: dp(8)
-
-                        MDLabel:
-                            text: "My Tasks"
-                            theme_text_color: "Custom"
-                            text_color: 1,1,1,.98
-                            bold: True
-                            font_size: "18sp"
-                            halign: "left"
-
-                        MDCard:
-                            id: time_pill
-                            size_hint: None, None
-                            height: dp(26)
-                            radius: [13,]
-                            padding: dp(12), 0
-                            md_bg_color: 1,1,1,.10
-                            elevation: 0
-                            MDLabel:
-                                id: time_label
-                                text: "Thu 06 Nov • 09:44:12"
-                                theme_text_color: "Custom"
-                                text_color: 1,1,1,.92
-                                font_size: "12sp"
-                                halign: "center"
-                                valign: "middle"
-                                size_hint: None, 1
-                                text_size: None, self.height
-                                on_texture_size: self.parent.width = self.texture_size[0] + dp(24)
-
-                    # Spacer ensures no overlap with the ring
-                    Widget:
-                        size_hint_y: None
-                        height: dp(26)
-
-                    # CONTENT: bigger ring + stats
                     MDBoxLayout:
                         adaptive_height: True
                         spacing: dp(16)
 
+                        # Progress circle
                         MDBoxLayout:
                             size_hint_x: None
                             width: dp(168)
@@ -337,9 +305,20 @@ KV = """
                                 bg_color: 1,1,1,.18
                                 thickness: dp(16)
 
+                        # Text stack: time (above) + progress
                         MDBoxLayout:
                             orientation: "vertical"
-                            spacing: dp(6)
+                            spacing: dp(4)
+
+                            MDLabel:
+                                id: time_label
+                                text: "Thu 06 Nov • 09:44:12"
+                                theme_text_color: "Custom"
+                                text_color: 1,1,1,.80
+                                font_size: "12sp"
+                                size_hint_y: None
+                                height: self.texture_size[1]
+
                             MDLabel:
                                 id: progress_caption
                                 text: "0% complete"
@@ -347,30 +326,49 @@ KV = """
                                 text_color: 1,1,1,.98
                                 font_size: "18sp"
                                 bold: True
+                                size_hint_y: None
+                                height: self.texture_size[1]
                             MDLabel:
                                 id: progress_sub
                                 text: "0 / 0 tasks"
                                 theme_text_color: "Custom"
                                 text_color: 1,1,1,.75
                                 font_size: "13sp"
+                                size_hint_y: None
+                                height: self.texture_size[1]
 
-                # ----- Task List Card -----
+                # Task list card (header + Add button)
                 GlassCard:
                     id: card_tasklist
-                    padding: 0
+                    padding: dp(14)
                     radius: [16,]
-                    MDScrollView:
-                        MDList:
-                            id: task_list
+                    MDBoxLayout:
+                        orientation: "vertical"
+                        spacing: dp(8)
 
-                MDButton:
-                    id: add_task_btn
-                    style: "filled"
-                    on_release: app.open_add_task()
-                    MDButtonText:
-                        text: "Add Task"
+                        MDBoxLayout:
+                            size_hint_y: None
+                            height: dp(32)
+                            MDLabel:
+                                text: "Tasks"
+                                theme_text_color: "Custom"
+                                text_color: 1,1,1,.9
+                                bold: True
+                                font_size: "14sp"
+                                halign: "left"
+                            Widget:
+                            MDButton:
+                                id: add_task_btn
+                                style: "filled"
+                                on_release: app.open_add_task()
+                                MDButtonText:
+                                    text: "Add Task"
 
-            # Right column: Actions grid
+                        MDScrollView:
+                            MDList:
+                                id: task_list
+
+            # Right column: Actions
             MDBoxLayout:
                 id: right_col
                 orientation: "vertical"
@@ -397,6 +395,14 @@ KV = """
 """
 
 
+class LoginScreen(MDScreen):
+    pass
+
+
+class AdminScreen(MDScreen):
+    pass
+
+
 class AppUSIU(MDApp):
     dialog: MDDialog | None = None
     new_task_field: MDTextField | None = None
@@ -414,12 +420,13 @@ class AppUSIU(MDApp):
         self.theme_cls.accent_palette = "Amber"
 
         Builder.load_string(KV)
-        self.sm = ScreenManager(transition=FadeTransition(duration=0.22))
-        self.sm.add_widget(Factory.LoginScreen())
-        self.sm.add_widget(Factory.AdminScreen())
+        # Slightly longer fade for a mobile-feel handoff
+        self.sm = ScreenManager(transition=FadeTransition(duration=0.32))
+        self.sm.add_widget(LoginScreen())
+        self.sm.add_widget(AdminScreen())
         return self.sm
 
-    # -------- Helpers --------
+    # ---------- helpers ----------
     def notify(self, text: str):
         try:
             MDSnackbar(MDSnackbarText(text=text), duration=1.6).open()
@@ -427,32 +434,34 @@ class AppUSIU(MDApp):
             print(f"[Snackbar fallback] {text} (reason: {e})")
 
     def forgot_password(self):
-        self.notify("Forgot password tapped")
+        self.notify("Ask IT Helpdesk to reset password")
 
-    # -------- Login --------
+    # ---------- login ----------
     def sign_in(self, email: str, password: str, remember: bool):
         e, p = email.strip(), password.strip()
         if not e or not p:
-            self.notify("Enter email and password")
-            return
+            self.notify("Enter email and password"); return
         if (e.lower() in ("admin", "admin@usiu.ac.ke")) and p == "1245":
             self.notify("Welcome, Admin")
-            Clock.schedule_once(lambda *_: self.to_admin(), 0.1)
+            self.to_admin()
             return
         self.notify("Invalid credentials (try admin@usiu.ac.ke / 1245)")
 
     def to_admin(self):
         self.sm.current = "admin"
+        # Build UI content after the screen swap so ids exist
         Clock.schedule_once(lambda *_: self._prepare_admin_screen(), 0.05)
         Clock.schedule_once(lambda *_: self._animate_admin_intro(), 0.10)
         Clock.schedule_once(lambda *_: self._start_live_clock(), 0.12)
+        # Initial progress update with a bit more delay so widgets are ready
+        Clock.schedule_once(self._animate_progress_to_current, 0.22)
 
-    def logout(self):
+    def logout(self, *_):
         self._stop_live_clock()
         self.sm.current = "login"
         self.notify("Signed out")
 
-    # -------- Profile menu --------
+    # ---------- profile menu ----------
     def open_profile_menu(self, caller_btn: MDIconButton):
         items = [
             {"text": "Profile", "on_release": lambda: self._profile_selected("profile")},
@@ -471,12 +480,15 @@ class AppUSIU(MDApp):
         else:
             self.notify("Profile (stub)")
 
-    # -------- Admin build --------
+    # ---------- admin build ----------
     def _prepare_admin_screen(self):
         scr = self.sm.get_screen("admin")
         grid: MDGridLayout = scr.ids.action_grid
-        grid.clear_widgets()
+        if grid is None:
+            Clock.schedule_once(lambda *_: self._prepare_admin_screen(), 0.05)
+            return
 
+        grid.clear_widgets()
         actions = [
             ("account-tie", "Manage Lecturers", self.action_manage_lecturers),
             ("book-open-variant", "Manage Courses", self.action_manage_courses),
@@ -487,7 +499,8 @@ class AppUSIU(MDApp):
             ("file-chart", "Reports", self.action_reports),
             ("cog", "Settings", self.action_settings),
         ]
-        for icon, label, fn in actions:
+        # Staggered tile entrance
+        for i, (icon, label, fn) in enumerate(actions):
             tile = self._action_tile(icon, label, fn)
             tile.opacity = 0
             tile.scale = 0.95
@@ -495,6 +508,7 @@ class AppUSIU(MDApp):
             Animation(opacity=1, scale=1, d=0.28, t="out_cubic").start(tile)
 
         self._refresh_progress_labels()
+        Clock.schedule_once(lambda *_: self._rebuild_task_list(), 0.05)
 
     def _action_tile(self, icon_name: str, label: str, callback):
         tile = MDCard(
@@ -518,9 +532,13 @@ class AppUSIU(MDApp):
                   on_release=lambda *_: Animation(scale=1.0, d=0.12).start(tile))
         return tile
 
-    # -------- Tasks --------
+    # ---------- tasks ----------
     def open_add_task(self):
-        self.new_task_field = MDTextField(hint_text="Task title", helper_text="e.g., Verify new course submissions")
+        self.new_task_field = MDTextField(
+            hint_text="Task title",
+            helper_text="e.g., Verify new course submissions",
+            mode="outlined",
+        )
         self.dialog = MDDialog(
             title="Add Task",
             type="custom",
@@ -530,6 +548,12 @@ class AppUSIU(MDApp):
                 MDButton(MDButtonText(text="Add"), style="filled", on_release=lambda *_: self._add_task_confirm()),
             ],
         )
+        # subtle slide-in for mobile feel
+        try:
+            self.dialog.ids.container.opacity = 0
+            Animation(opacity=1, d=.20).start(self.dialog.ids.container)
+        except Exception:
+            pass
         self.dialog.open()
 
     def _add_task_confirm(self):
@@ -541,23 +565,59 @@ class AppUSIU(MDApp):
         self.dialog.dismiss()
         self.notify("Task added")
 
-    def _rebuild_task_list(self):
+    def _rebuild_task_list(self, *_):
         scr = self.sm.get_screen("admin")
-        lst = scr.ids.task_list
+        lst = scr.ids.get("task_list", None)
+        if lst is None:
+            Clock.schedule_once(self._rebuild_task_list, 0.05)
+            return
+
         lst.clear_widgets()
-        for idx, task in enumerate(self.tasks):
-            item = MDListItem(
-                ripple_behavior=True,
-                on_release=lambda _i, _idx=idx: self._toggle_task(_idx)
+
+        if not self.tasks:
+            # prettier empty-state row (rounded, icon, soft bg + pulse)
+            hint_card = MDCard(
+                md_bg_color=(1, 1, 1, 0.06),
+                elevation=0,
+                radius=[12],
+                padding=(dp(12), dp(12)),
+                size_hint_y=None,
+                height=dp(56),
             )
+            row = MDBoxLayout(orientation="horizontal", spacing=dp(10))
+            row.add_widget(MDIcon(icon="information-outline",
+                                  theme_text_color="Custom",
+                                  text_color=(.75, .82, 1, 1)))
+            row.add_widget(MDLabel(text="You have zero tasks",
+                                   theme_text_color="Custom",
+                                   text_color=(1, 1, 1, .88)))
+            hint_card.add_widget(row)
+            # light pulse to draw attention
+            hint_card.opacity = 0
+            Animation(opacity=1, d=.30, t="out_cubic").start(hint_card)
+
+            container = MDBoxLayout(orientation="vertical", spacing=dp(8), size_hint_y=None)
+            container.height = hint_card.height
+            container.add_widget(hint_card)
+            lst.add_widget(container)
+
+            Clock.schedule_once(self._animate_progress_to_current, 0.05)
+            return
+
+        for idx, task in enumerate(self.tasks):
+            item = MDListItem(on_release=lambda _i, _idx=idx: self._toggle_task(_idx))
             item.add_widget(MDListItemLeadingIcon(
                 icon="check-circle" if task["done"] else "checkbox-blank-circle-outline",
                 theme_text_color="Custom", text_color=(.58, .78, 1, 1)))
             item.add_widget(MDListItemHeadlineText(text=task["title"]))
+            # on_release first param is the instance; keep signature safe
             item.add_widget(MDListItemTrailingIcon(
-                icon="close", on_release=lambda _b, _idx=idx: self._remove_task(_idx)))
+                icon="close", on_release=lambda _btn, _idx=idx: self._remove_task(_idx)))
+            item.opacity = 0
             lst.add_widget(item)
-        self._animate_progress_to_current()
+            Animation(opacity=1, d=.20).start(item)
+
+        Clock.schedule_once(self._animate_progress_to_current, 0.05)
 
     def _toggle_task(self, idx: int):
         self.tasks[idx]["done"] = not self.tasks[idx]["done"]
@@ -575,25 +635,44 @@ class AppUSIU(MDApp):
             return 0.0
         return sum(1 for t in self.tasks if t["done"]) / float(len(self.tasks))
 
-    def _refresh_progress_labels(self):
-        scr = self.sm.get_screen("admin")
-        ring: UICircleProgress = scr.ids.progress_ring
-        cap: MDLabel = scr.ids.progress_caption
-        sub: MDLabel = scr.ids.progress_sub
-        pct = int(round((ring.progress or 0) * 100))
-        cap.text = f"{pct}% complete"
-        sub.text = f"{sum(1 for t in self.tasks if t.get('done'))} / {len(self.tasks)} tasks"
+    def _refresh_progress_labels(self, *_):
+        try:
+            scr = self.sm.get_screen("admin")
+            ring: UICircleProgress = scr.ids.get("progress_ring", None)
+            cap: MDLabel = scr.ids.get("progress_caption", None)
+            sub: MDLabel = scr.ids.get("progress_sub", None)
+            if not (ring and cap and sub):
+                return
+            pct = int(round((ring.progress or 0) * 100))
+            cap.text = f"{pct}% complete"
+            sub.text = f"{sum(1 for t in self.tasks if t.get('done'))} / {len(self.tasks)} tasks"
+        except Exception:
+            pass
 
-    def _animate_progress_to_current(self):
-        scr = self.sm.get_screen("admin")
-        ring: UICircleProgress = scr.ids.progress_ring
+    def _animate_progress_to_current(self, *_):
+        """Start the ring animation ONLY when the ring widget exists."""
+        try:
+            scr = self.sm.get_screen("admin")
+        except Exception:
+            Clock.schedule_once(self._animate_progress_to_current, 0.05)
+            return
+
+        ring = scr.ids.get("progress_ring", None)
+        if ring is None:
+            Clock.schedule_once(self._animate_progress_to_current, 0.05)
+            return
+
         target = self._calc_progress()
-        Animation.cancel_all(ring, "progress")
-        Animation(progress=target, d=.35, t="out_cubic").bind(
-            on_progress=lambda *_: self._refresh_progress_labels()
-        ).start(ring)
+        try:
+            Animation.cancel_all(ring, "progress")
+            anim = Animation(progress=target, d=.35, t="out_cubic")
+            anim.bind(on_progress=self._refresh_progress_labels)
+            anim.start(ring)
+        except Exception:
+            ring.progress = target
+            self._refresh_progress_labels()
 
-    # -------- Entrance animations --------
+    # ---------- entrance animations ----------
     def _animate_admin_intro(self):
         scr = self.sm.get_screen("admin")
         header = scr.ids.header_bar
@@ -602,28 +681,30 @@ class AppUSIU(MDApp):
         actions_card = scr.ids.actions_card
         tasks_card = scr.ids.card_tasks
         tasklist_card = scr.ids.card_tasklist
-        add_btn = scr.ids.add_task_btn
+        tasks_title = scr.ids.tasks_section_title
 
-        for w in (header, left, right, tasks_card, tasklist_card, actions_card, add_btn):
+        for w in (header, left, right, tasks_card, tasklist_card, actions_card, tasks_title):
             w.opacity = 0
         header.y += dp(18); left.x -= dp(22); right.y -= dp(22)
 
         Animation(opacity=1, y=header.y - dp(18), d=.28, t="out_cubic").start(header)
         Clock.schedule_once(lambda *_: Animation(opacity=1, x=left.x + dp(22), d=.30, t="out_cubic").start(left), .06)
         Clock.schedule_once(lambda *_: Animation(opacity=1, y=right.y + dp(22), d=.32, t="out_cubic").start(right), .10)
+        Clock.schedule_once(lambda *_: Animation(opacity=1, d=.25).start(tasks_title), .12)
         Clock.schedule_once(lambda *_: Animation(opacity=1, d=.25).start(tasks_card), .16)
         Clock.schedule_once(lambda *_: Animation(opacity=1, d=.25).start(tasklist_card), .22)
         Clock.schedule_once(lambda *_: Animation(opacity=1, d=.25).start(actions_card), .22)
-        Clock.schedule_once(lambda *_: Animation(opacity=1, d=.25).start(add_btn), .28)
 
-    # -------- Live date/time --------
+    # ---------- live clock ----------
     def _format_now(self) -> str:
         return datetime.now().strftime("%a %d %b • %H:%M:%S")
 
     def _tick_clock(self, *_):
         try:
             scr = self.sm.get_screen("admin")
-            scr.ids.time_label.text = self._format_now()
+            lbl = scr.ids.get("time_label", None)
+            if lbl:
+                lbl.text = self._format_now()
         except Exception:
             pass
 
@@ -637,7 +718,7 @@ class AppUSIU(MDApp):
             self._clock_ev.cancel()
             self._clock_ev = None
 
-    # -------- Action stubs --------
+    # ---------- action stubs ----------
     def action_manage_lecturers(self): self.notify("Open: Manage Lecturers")
     def action_manage_courses(self): self.notify("Open: Manage Courses")
     def action_manage_students(self): self.notify("Open: Manage Students")
