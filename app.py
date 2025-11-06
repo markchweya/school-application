@@ -61,9 +61,8 @@ class UICircleProgress(Widget):
                  width=self.thickness, cap="round")
 
 
-# ---------- One task row ----------
+# ---------- One task row with status menu ----------
 class TaskRow(MDCard):
-    """Custom row for a task with status toggle, title label, edit and delete."""
     task_id = StringProperty("")
     title = StringProperty("")
     status = StringProperty("todo")  # "todo" | "progress" | "done"
@@ -77,10 +76,11 @@ class TaskRow(MDCard):
         self.size_hint_y = None
         self.height = dp(52)
         self.md_bg_color = (1, 1, 1, 0.06)
+        self._menu = None  # dropdown for status
 
         row = MDBoxLayout(orientation="horizontal", spacing=dp(10))
 
-        # Left: status icon button
+        # Left: quick toggle (tap to cycle)
         self.btn_status = MDIconButton(
             theme_text_color="Custom",
             text_color=self._status_color(self.status),
@@ -90,6 +90,17 @@ class TaskRow(MDCard):
         self.btn_status.size_hint = (None, None)
         self.btn_status.size = (dp(36), dp(36))
         row.add_widget(self.btn_status)
+
+        # Down chevron opens explicit status menu
+        self.btn_menu = MDIconButton(
+            icon="chevron-down",
+            theme_text_color="Custom",
+            text_color=(.85, .90, 1, 1),
+            on_release=lambda *_: self._open_status_menu()
+        )
+        self.btn_menu.size_hint = (None, None)
+        self.btn_menu.size = (dp(32), dp(32))
+        row.add_widget(self.btn_menu)
 
         # Title label (stretch)
         self.lbl = MDLabel(
@@ -126,7 +137,7 @@ class TaskRow(MDCard):
 
         self.add_widget(row)
 
-    # helpers
+    # visuals
     def _status_icon(self, st: str) -> str:
         return {"todo": "checkbox-blank-circle-outline",
                 "progress": "progress-check",
@@ -137,18 +148,39 @@ class TaskRow(MDCard):
                 "progress": (1.00, .86, .45, 1),
                 "done": (.54, .90, .62, 1)}[st]
 
+    # actions
     def _cycle_status(self):
         order = ["todo", "progress", "done"]
         nxt = order[(order.index(self.status) + 1) % len(order)]
-        self.status = nxt
+        self._set_status(nxt)
+
+    def _open_status_menu(self):
+        items = []
+        mapping = [("todo", "Not started"), ("progress", "In progress"), ("done", "Complete")]
+        for key, label in mapping:
+            items.append({
+                "text": label,
+                "on_release": (lambda k=key: self._menu_select(k))
+            })
+        if self._menu:
+            self._menu.dismiss()
+        self._menu = MDDropdownMenu(caller=self.btn_menu, items=items, width_mult=3)
+        self._menu.open()
+
+    def _menu_select(self, key: str):
+        if self._menu:
+            self._menu.dismiss()
+        self._set_status(key)
+
+    def _set_status(self, new_status: str):
+        self.status = new_status
         # update visuals
-        self.btn_status.icon = self._status_icon(nxt)
-        self.btn_status.text_color = self._status_color(nxt)
-        # notify app
+        self.btn_status.icon = self._status_icon(new_status)
+        self.btn_status.text_color = self._status_color(new_status)
+        # notify app and toast
         if self.app_ref:
-            self.app_ref.update_task_status(self.task_id, nxt)
-            label = {"todo": "Not started", "progress": "In progress", "done": "Complete"}[nxt]
-            self.app_ref.notify(f"Status: {label}")
+            self.app_ref.update_task_status(self.task_id, new_status)
+            self.app_ref.notify({"todo": "Not started", "progress": "In progress", "done": "Complete"}[new_status])
 
     def _delete_me(self):
         if self.app_ref:
@@ -520,13 +552,11 @@ class AdminScreen(MDScreen):
 
 
 class AppUSIU(MDApp):
-    # lightweight modals instead of MDDialog
     _add_view: ModalView | None = None
     _rename_view: ModalView | None = None
     new_task_field: MDTextField | None = None
     rename_field: MDTextField | None = None
 
-    # task model list of dicts with stable IDs
     tasks = ListProperty([])  # [{"id": str, "title": str, "status": str}, ...]
 
     _profile_menu: MDDropdownMenu | None = None
@@ -543,27 +573,24 @@ class AppUSIU(MDApp):
         self.theme_cls.primary_palette = "Indigo"
         self.theme_cls.accent_palette = "Amber"
 
-        # register TaskRow rule so kivy can instantiate it
-        Builder.load_string("""
-<TaskRow>:
-""")
+        Builder.load_string("<TaskRow>:\n")
         Builder.load_string(KV)
         self.sm = ScreenManager(transition=FadeTransition(duration=0.32))
         self.sm.add_widget(LoginScreen())
         self.sm.add_widget(AdminScreen())
         return self.sm
 
-    # ---- helpers ----
+    # helpers
     def notify(self, text: str):
         try:
-            MDSnackbar(MDSnackbarText(text=text), duration=1.4).open()
+            MDSnackbar(MDSnackbarText(text=text), duration=1.2).open()
         except Exception as e:
             print(f"[Snackbar] {text} ({e})")
 
     def forgot_password(self):
         self.notify("Ask IT Helpdesk to reset password")
 
-    # ---- login ----
+    # login
     def sign_in(self, email: str, password: str, remember: bool):
         e, p = email.strip(), password.strip()
         if not e or not p:
@@ -586,7 +613,7 @@ class AppUSIU(MDApp):
         self.sm.current = "login"
         self.notify("Signed out")
 
-    # ---- profile menu ----
+    # profile menu
     def open_profile_menu(self, caller_btn: MDIconButton):
         items = [
             {"text": "Profile", "on_release": lambda: self._profile_selected("profile")},
@@ -605,7 +632,7 @@ class AppUSIU(MDApp):
         else:
             self.notify("Profile (coming soon)")
 
-    # ---- admin build ----
+    # admin build
     def _prepare_admin_screen(self):
         scr = self.sm.get_screen("admin")
         grid: MDGridLayout = scr.ids.action_grid
@@ -637,8 +664,6 @@ class AppUSIU(MDApp):
 
             def _press(*_):
                 Animation(md_bg_color=(1, 1, 1, 0.10), elevation=2, d=.10).start(tile)
-
-            # FIXED: capture fn via default arg on a normal named parameter
             def _release(*_, cb=fn):
                 Animation(md_bg_color=(1, 1, 1, 0.06), elevation=0, d=.18).start(tile)
                 cb()
@@ -659,7 +684,7 @@ class AppUSIU(MDApp):
         self._refresh_progress_labels()
         Clock.schedule_once(lambda *_: self._rebuild_task_list(), 0.05)
 
-    # ---- add / rename modals (ModalView) ----
+    # simple modals (no MDDialog dependency)
     def _build_modal(self, title_text: str, field: MDTextField, on_confirm):
         card = MDCard(
             orientation="vertical",
@@ -736,7 +761,7 @@ class AppUSIU(MDApp):
         self._rename_view = mv
         mv.open()
 
-    # ---- task ops called from TaskRow ----
+    # task ops
     def update_task_status(self, task_id: str, status: str):
         for t in self.tasks:
             if t["id"] == task_id:
@@ -789,12 +814,13 @@ class AppUSIU(MDApp):
 
         self._animate_progress_to_current()
 
-    # ---- progress math & UI ----
+    # progress math & UI
     def _calc_progress(self) -> float:
         n = len(self.tasks)
         if n == 0:
             return 0.0
-        score = sum(self.STATUS_WEIGHTS[t["status"]] for t in self.tasks)
+        weights = {"todo": 0.0, "progress": 0.5, "done": 1.0}
+        score = sum(weights[t["status"]] for t in self.tasks)
         return score / float(n)
 
     def _refresh_progress_labels(self, *_):
@@ -831,7 +857,7 @@ class AppUSIU(MDApp):
             ring.progress = target
             self._refresh_progress_labels()
 
-    # ---- entrance choreography ----
+    # entrance choreography
     def _animate_admin_intro(self):
         scr = self.sm.get_screen("admin")
         header = scr.ids.header_bar
@@ -854,7 +880,7 @@ class AppUSIU(MDApp):
         Clock.schedule_once(lambda *_: Animation(opacity=1, d=.25).start(tasklist_card), .22)
         Clock.schedule_once(lambda *_: Animation(opacity=1, d=.25).start(actions_card), .22)
 
-    # ---- live clock ----
+    # live clock
     def _format_now(self) -> str:
         return datetime.now().strftime("%a %d %b • %H:%M:%S")
 
@@ -877,7 +903,7 @@ class AppUSIU(MDApp):
             self._clock_ev.cancel()
             self._clock_ev = None
 
-    # ---- action stubs ----
+    # action stubs
     def action_manage_lecturers(self): self.notify("Open: Manage Lecturers")
     def action_manage_courses(self): self.notify("Open: Manage Courses")
     def action_manage_students(self): self.notify("Open: Manage Students")
