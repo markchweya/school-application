@@ -3,15 +3,20 @@ from kivy import require
 require("2.3.0")
 
 from datetime import datetime
+from uuid import uuid4
+
 from kivy.core.window import Window
 from kivy.lang import Builder
-from kivy.properties import ColorProperty, ListProperty, NumericProperty
+from kivy.properties import (
+    ColorProperty, ListProperty, NumericProperty,
+    StringProperty, ObjectProperty
+)
 from kivy.clock import Clock
 from kivy.animation import Animation
 from kivy.uix.widget import Widget
 from kivy.metrics import dp
 from kivy.uix.screenmanager import ScreenManager, FadeTransition
-from kivy.uix.modalview import ModalView  # <-- use ModalView instead of MDDialog
+from kivy.uix.modalview import ModalView
 
 from kivymd.app import MDApp
 from kivymd.uix.screen import MDScreen
@@ -20,20 +25,13 @@ from kivymd.uix.button import MDButton, MDButtonText, MDIconButton
 from kivymd.uix.snackbar import MDSnackbar, MDSnackbarText
 from kivymd.uix.card import MDCard
 from kivymd.uix.gridlayout import MDGridLayout
-from kivymd.uix.list import (
-    MDListItem,
-    MDListItemHeadlineText,
-    MDListItemTrailingIcon,
-    MDListItemLeadingIcon,
-)
 from kivymd.uix.boxlayout import MDBoxLayout
 from kivymd.uix.label import MDLabel, MDIcon
 from kivymd.uix.scrollview import MDScrollView
 from kivymd.uix.menu import MDDropdownMenu
-from kivymd.uix.selectioncontrol import MDCheckbox
 
 
-# ---------- Neumorphic circle progress ----------
+# ---------- Circle progress ----------
 class UICircleProgress(Widget):
     progress = NumericProperty(0.0)
     ring_color = ColorProperty([0.62, 0.72, 1.0, 1.0])
@@ -61,6 +59,104 @@ class UICircleProgress(Widget):
             Line(circle=(self.center_x, self.center_y, min(self.size)/2 - self.thickness/2, -90,
                          -90 + 360 * max(0.0, min(1.0, self.progress))),
                  width=self.thickness, cap="round")
+
+
+# ---------- One task row ----------
+class TaskRow(MDCard):
+    """Custom row for a task with status toggle, title label, edit and delete."""
+    task_id = StringProperty("")
+    title = StringProperty("")
+    status = StringProperty("todo")  # "todo" | "progress" | "done"
+    app_ref = ObjectProperty(None)
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.elevation = 0
+        self.radius = [14]
+        self.padding = (dp(10), dp(10))
+        self.size_hint_y = None
+        self.height = dp(52)
+        self.md_bg_color = (1, 1, 1, 0.06)
+
+        row = MDBoxLayout(orientation="horizontal", spacing=dp(10))
+
+        # Left: status icon button
+        self.btn_status = MDIconButton(
+            theme_text_color="Custom",
+            text_color=self._status_color(self.status),
+            icon=self._status_icon(self.status),
+            on_release=lambda *_: self._cycle_status()
+        )
+        self.btn_status.size_hint = (None, None)
+        self.btn_status.size = (dp(36), dp(36))
+        row.add_widget(self.btn_status)
+
+        # Title label (stretch)
+        self.lbl = MDLabel(
+            text=self.title,
+            theme_text_color="Custom",
+            text_color=(1, 1, 1, .95),
+            halign="left",
+            valign="middle"
+        )
+        row.add_widget(self.lbl)
+        row.add_widget(Widget())
+
+        # Edit
+        self.btn_edit = MDIconButton(
+            icon="pencil-outline",
+            theme_text_color="Custom",
+            text_color=(.85, .90, 1, 1),
+            on_release=lambda *_: self._edit_title()
+        )
+        self.btn_edit.size_hint = (None, None)
+        self.btn_edit.size = (dp(32), dp(32))
+        row.add_widget(self.btn_edit)
+
+        # Delete
+        self.btn_del = MDIconButton(
+            icon="trash-can-outline",
+            theme_text_color="Custom",
+            text_color=(1, .80, .80, 1),
+            on_release=lambda *_: self._delete_me()
+        )
+        self.btn_del.size_hint = (None, None)
+        self.btn_del.size = (dp(32), dp(32))
+        row.add_widget(self.btn_del)
+
+        self.add_widget(row)
+
+    # helpers
+    def _status_icon(self, st: str) -> str:
+        return {"todo": "checkbox-blank-circle-outline",
+                "progress": "progress-check",
+                "done": "check-circle"}[st]
+
+    def _status_color(self, st: str):
+        return {"todo": (.70, .76, .95, 1),
+                "progress": (1.00, .86, .45, 1),
+                "done": (.54, .90, .62, 1)}[st]
+
+    def _cycle_status(self):
+        order = ["todo", "progress", "done"]
+        nxt = order[(order.index(self.status) + 1) % len(order)]
+        self.status = nxt
+        # update visuals
+        self.btn_status.icon = self._status_icon(nxt)
+        self.btn_status.text_color = self._status_color(nxt)
+        # notify app
+        if self.app_ref:
+            self.app_ref.update_task_status(self.task_id, nxt)
+            label = {"todo": "Not started", "progress": "In progress", "done": "Complete"}[nxt]
+            self.app_ref.notify(f"Status: {label}")
+
+    def _delete_me(self):
+        if self.app_ref:
+            self.app_ref.delete_task(self.task_id)
+
+    def _edit_title(self):
+        if self.app_ref:
+            self.app_ref.open_rename_task(self.task_id, self.title)
 
 
 KV = """
@@ -381,8 +477,12 @@ KV = """
                                         radius: [20,]
 
                         MDScrollView:
-                            MDList:
+                            MDBoxLayout:
                                 id: task_list
+                                orientation: "vertical"
+                                spacing: dp(8)
+                                size_hint_y: None
+                                height: self.minimum_height
 
             # Right: quick actions
             MDBoxLayout:
@@ -420,15 +520,20 @@ class AdminScreen(MDScreen):
 
 
 class AppUSIU(MDApp):
-    # use ModalView instead of MDDialog for max compatibility
+    # lightweight modals instead of MDDialog
     _add_view: ModalView | None = None
+    _rename_view: ModalView | None = None
     new_task_field: MDTextField | None = None
+    rename_field: MDTextField | None = None
 
-    # task model: {"title": str, "status": "todo"|"almost"|"done"}
-    tasks = ListProperty([])
+    # task model list of dicts with stable IDs
+    tasks = ListProperty([])  # [{"id": str, "title": str, "status": str}, ...]
 
     _profile_menu: MDDropdownMenu | None = None
     _clock_ev = None
+
+    STATUS_LABELS = {"todo": "Not started", "progress": "In progress", "done": "Complete"}
+    STATUS_WEIGHTS = {"todo": 0.0, "progress": 0.5, "done": 1.0}
 
     def build(self):
         if not Window.fullscreen:
@@ -438,23 +543,27 @@ class AppUSIU(MDApp):
         self.theme_cls.primary_palette = "Indigo"
         self.theme_cls.accent_palette = "Amber"
 
+        # register TaskRow rule so kivy can instantiate it
+        Builder.load_string("""
+<TaskRow>:
+""")
         Builder.load_string(KV)
         self.sm = ScreenManager(transition=FadeTransition(duration=0.32))
         self.sm.add_widget(LoginScreen())
         self.sm.add_widget(AdminScreen())
         return self.sm
 
-    # --- helpers ---
+    # ---- helpers ----
     def notify(self, text: str):
         try:
-            MDSnackbar(MDSnackbarText(text=text), duration=1.6).open()
+            MDSnackbar(MDSnackbarText(text=text), duration=1.4).open()
         except Exception as e:
             print(f"[Snackbar] {text} ({e})")
 
     def forgot_password(self):
         self.notify("Ask IT Helpdesk to reset password")
 
-    # --- login ---
+    # ---- login ----
     def sign_in(self, email: str, password: str, remember: bool):
         e, p = email.strip(), password.strip()
         if not e or not p:
@@ -477,7 +586,7 @@ class AppUSIU(MDApp):
         self.sm.current = "login"
         self.notify("Signed out")
 
-    # --- profile menu ---
+    # ---- profile menu ----
     def open_profile_menu(self, caller_btn: MDIconButton):
         items = [
             {"text": "Profile", "on_release": lambda: self._profile_selected("profile")},
@@ -496,7 +605,7 @@ class AppUSIU(MDApp):
         else:
             self.notify("Profile (coming soon)")
 
-    # --- admin build ---
+    # ---- admin build ----
     def _prepare_admin_screen(self):
         scr = self.sm.get_screen("admin")
         grid: MDGridLayout = scr.ids.action_grid
@@ -516,7 +625,33 @@ class AppUSIU(MDApp):
             ("cog", "Settings", self.action_settings),
         ]
         for icon, label, fn in actions:
-            tile = self._action_tile(icon, label, fn)
+            tile = MDCard(
+                md_bg_color=(1, 1, 1, 0.06),
+                elevation=0,
+                radius=[20],
+                padding=(dp(16), dp(18)),
+                ripple_behavior=True,
+                size_hint_y=None,
+                height=dp(150),
+            )
+
+            def _press(*_):
+                Animation(md_bg_color=(1, 1, 1, 0.10), elevation=2, d=.10).start(tile)
+
+            # FIXED: capture fn via default arg on a normal named parameter
+            def _release(*_, cb=fn):
+                Animation(md_bg_color=(1, 1, 1, 0.06), elevation=0, d=.18).start(tile)
+                cb()
+
+            box = MDBoxLayout(orientation="vertical", spacing=dp(10))
+            ic = MDIcon(icon=icon, theme_text_color="Custom", text_color=(.85, .89, 1, 1))
+            ic.font_size = "40sp"
+            lbl = MDLabel(text=label, theme_text_color="Custom", text_color=(1, 1, 1, .96),
+                          halign="center", font_size="15sp")
+            box.add_widget(ic); box.add_widget(lbl)
+            tile.add_widget(box)
+            tile.bind(on_press=_press, on_release=_release)
+
             tile.opacity = 0
             grid.add_widget(tile)
             Animation(opacity=1, d=0.26, t="out_cubic").start(tile)
@@ -524,51 +659,8 @@ class AppUSIU(MDApp):
         self._refresh_progress_labels()
         Clock.schedule_once(lambda *_: self._rebuild_task_list(), 0.05)
 
-    def _action_tile(self, icon_name: str, label: str, callback):
-        tile = MDCard(
-            md_bg_color=(1, 1, 1, 0.06),
-            elevation=0,
-            radius=[20],
-            padding=(dp(16), dp(18)),
-            ripple_behavior=True,
-            size_hint_y=None,
-            height=dp(150),
-        )
-
-        def _press(*_):
-            Animation(md_bg_color=(1, 1, 1, 0.10), elevation=2, d=.10).start(tile)
-
-        def _release(*_):
-            Animation(md_bg_color=(1, 1, 1, 0.06), elevation=0, d=.18).start(tile)
-            callback()
-
-        box = MDBoxLayout(orientation="vertical", spacing=dp(10))
-        ic = MDIcon(icon=icon_name, theme_text_color="Custom", text_color=(.85, .89, 1, 1))
-        ic.font_size = "40sp"
-        lbl = MDLabel(text=label, theme_text_color="Custom", text_color=(1, 1, 1, .96),
-                      halign="center", font_size="15sp")
-        box.add_widget(ic); box.add_widget(lbl)
-        tile.add_widget(box)
-        tile.bind(on_press=_press, on_release=_release)
-        return tile
-
-    # --- lightweight "dialog" built with ModalView ---
-    def open_add_task(self):
-        if self._add_view:
-            try:
-                self._add_view.dismiss()
-            except Exception:
-                pass
-            self._add_view = None
-
-        self.new_task_field = MDTextField(
-            hint_text="Task title",
-            mode="outlined",
-            size_hint_y=None,
-            height=dp(56),
-        )
-
-        # Build the modal content
+    # ---- add / rename modals (ModalView) ----
+    def _build_modal(self, title_text: str, field: MDTextField, on_confirm):
         card = MDCard(
             orientation="vertical",
             padding=(dp(16), dp(16), dp(16), dp(12)),
@@ -579,7 +671,7 @@ class AppUSIU(MDApp):
             md_bg_color=(0.10, 0.11, 0.16, 1),
         )
         title = MDLabel(
-            text="Add Task",
+            text=title_text,
             theme_text_color="Custom",
             text_color=(1, 1, 1, .96),
             bold=True,
@@ -588,83 +680,86 @@ class AppUSIU(MDApp):
             height=dp(26),
         )
         btn_row = MDBoxLayout(spacing=dp(8), size_hint_y=None, height=dp(44))
-        btn_cancel = MDButton(style="text", on_release=lambda *_: self._dismiss_add_view())
+        btn_cancel = MDButton(style="text", on_release=lambda *_: mv.dismiss())
         btn_cancel.add_widget(MDButtonText(text="Cancel"))
-        btn_add = MDButton(style="filled", on_release=lambda *_: self._add_task_confirm())
-        btn_add.add_widget(MDButtonText(text="Add"))
+        btn_ok = MDButton(style="filled", on_release=lambda *_: on_confirm() or mv.dismiss())
+        btn_ok.add_widget(MDButtonText(text="Save"))
         btn_row.add_widget(Widget())
         btn_row.add_widget(btn_cancel)
-        btn_row.add_widget(btn_add)
+        btn_row.add_widget(btn_ok)
 
         card.add_widget(title)
-        card.add_widget(self.new_task_field)
+        card.add_widget(field)
         card.add_widget(btn_row)
 
         mv = ModalView(size_hint=(1, 1), background_color=(0, 0, 0, 0.45), auto_dismiss=True)
         mv.add_widget(card)
+        return mv
+
+    def open_add_task(self):
+        self.new_task_field = MDTextField(
+            hint_text="Task title",
+            mode="outlined",
+            size_hint_y=None,
+            height=dp(56),
+        )
+        mv = self._build_modal("Add Task", self.new_task_field, self._add_task_confirm)
         self._add_view = mv
         mv.open()
-
-    def _dismiss_add_view(self):
-        if self._add_view:
-            try:
-                self._add_view.dismiss()
-            finally:
-                self._add_view = None
 
     def _add_task_confirm(self):
         title = (self.new_task_field.text or "").strip()
         if not title:
             self.notify("Enter a task title"); return
-        self.tasks.append({"title": title, "status": "todo"})
+        self.tasks.append({"id": str(uuid4()), "title": title, "status": "todo"})
         self._rebuild_task_list()
-        self._dismiss_add_view()
         self.notify("Task added")
 
-    # --- task helpers ---
-    def _status_icon(self, status: str) -> str:
-        return {
-            "todo": "checkbox-blank-circle-outline",
-            "almost": "progress-check",
-            "done": "check-circle",
-        }.get(status, "checkbox-blank-circle-outline")
-
-    def _status_color(self, status: str):
-        return {
-            "todo": (.70, .76, .95, 1),
-            "almost": (1.00, .86, .45, 1),
-            "done": (.54, .90, .62, 1),
-        }[status]
-
-    def _status_weight(self, status: str) -> float:
-        return {"todo": 0.0, "almost": 0.5, "done": 1.0}[status]
-
-    def _cycle_status(self, idx: int):
-        order = ["todo", "almost", "done"]
-        cur = self.tasks[idx]["status"]
-        nxt = order[(order.index(cur) + 1) % len(order)]
-        self.tasks[idx]["status"] = nxt
-        self._rebuild_task_list()
-        self.notify(f"Task marked {nxt.replace('almost','almost done')}")
-
-    def _remove_task(self, idx: int):
-        if 0 <= idx < len(self.tasks):
-            title = self.tasks[idx]["title"]
-            self.tasks.pop(idx)
+    def open_rename_task(self, task_id: str, current_title: str):
+        self.rename_field = MDTextField(
+            text=current_title,
+            mode="outlined",
+            size_hint_y=None,
+            height=dp(56),
+        )
+        def _do():
+            new_t = (self.rename_field.text or "").strip()
+            if not new_t:
+                self.notify("Title cannot be empty"); return
+            for t in self.tasks:
+                if t["id"] == task_id:
+                    t["title"] = new_t
+                    break
             self._rebuild_task_list()
-            self.notify(f"Removed: {title}")
+            self.notify("Task updated")
+        mv = self._build_modal("Rename Task", self.rename_field, _do)
+        self._rename_view = mv
+        mv.open()
+
+    # ---- task ops called from TaskRow ----
+    def update_task_status(self, task_id: str, status: str):
+        for t in self.tasks:
+            if t["id"] == task_id:
+                t["status"] = status
+                break
+        self._animate_progress_to_current()
+
+    def delete_task(self, task_id: str):
+        self.tasks = [t for t in self.tasks if t["id"] != task_id]
+        self._rebuild_task_list()
+        self.notify("Task deleted")
 
     def _rebuild_task_list(self, *_):
         scr = self.sm.get_screen("admin")
-        lst = scr.ids.get("task_list", None)
-        if lst is None:
+        container: MDBoxLayout = scr.ids.get("task_list", None)
+        if container is None:
             Clock.schedule_once(self._rebuild_task_list, 0.05)
             return
 
-        lst.clear_widgets()
+        container.clear_widgets()
 
         if not self.tasks:
-            row_card = MDCard(
+            empty = MDCard(
                 md_bg_color=(1, 1, 1, 0.06),
                 elevation=0,
                 radius=[14],
@@ -679,46 +774,28 @@ class AppUSIU(MDApp):
             line.add_widget(MDLabel(text="You have zero tasks",
                                     theme_text_color="Custom",
                                     text_color=(1, 1, 1, .90)))
-            row_card.add_widget(line)
-            row_card.opacity = 0
-            Animation(opacity=1, d=.28).start(row_card)
-            lst.add_widget(row_card)
-
-            Clock.schedule_once(self._animate_progress_to_current, 0.05)
+            empty.add_widget(line)
+            empty.opacity = 0
+            Animation(opacity=1, d=.28).start(empty)
+            container.add_widget(empty)
+            self._animate_progress_to_current()
             return
 
-        for idx, task in enumerate(self.tasks):
-            item = MDListItem()
-            lead = MDListItemLeadingIcon(
-                icon=self._status_icon(task["status"]),
-                theme_text_color="Custom",
-                text_color=self._status_color(task["status"]),
-            )
-            lead.bind(on_release=lambda _btn, _idx=idx: self._cycle_status(_idx))
-            item.add_widget(lead)
+        for t in self.tasks:
+            row = TaskRow(task_id=t["id"], title=t["title"], status=t["status"], app_ref=self)
+            row.opacity = 0
+            container.add_widget(row)
+            Animation(opacity=1, d=.18).start(row)
 
-            item.add_widget(MDListItemHeadlineText(text=task["title"]))
+        self._animate_progress_to_current()
 
-            trash = MDListItemTrailingIcon(
-                icon="trash-can-outline",
-                theme_text_color="Custom",
-                text_color=(1,1,1,.80),
-                on_release=lambda _btn, _idx=idx: self._remove_task(_idx),
-            )
-            item.add_widget(trash)
-
-            item.opacity = 0
-            lst.add_widget(item)
-            Animation(opacity=1, d=.20).start(item)
-
-        Clock.schedule_once(self._animate_progress_to_current, 0.05)
-
-    # --- progress math & UI ---
+    # ---- progress math & UI ----
     def _calc_progress(self) -> float:
-        if not self.tasks:
+        n = len(self.tasks)
+        if n == 0:
             return 0.0
-        score = sum(self._status_weight(t["status"]) for t in self.tasks)
-        return score / float(len(self.tasks))
+        score = sum(self.STATUS_WEIGHTS[t["status"]] for t in self.tasks)
+        return score / float(n)
 
     def _refresh_progress_labels(self, *_):
         try:
@@ -735,11 +812,11 @@ class AppUSIU(MDApp):
     def _animate_progress_to_current(self, *_):
         try:
             scr = self.sm.get_screen("admin")
+            ring = scr.ids.get("progress_ring", None)
         except Exception:
             Clock.schedule_once(self._animate_progress_to_current, 0.05)
             return
 
-        ring = scr.ids.get("progress_ring", None)
         if ring is None:
             Clock.schedule_once(self._animate_progress_to_current, 0.05)
             return
@@ -754,7 +831,7 @@ class AppUSIU(MDApp):
             ring.progress = target
             self._refresh_progress_labels()
 
-    # --- entrance choreography ---
+    # ---- entrance choreography ----
     def _animate_admin_intro(self):
         scr = self.sm.get_screen("admin")
         header = scr.ids.header_bar
@@ -777,7 +854,7 @@ class AppUSIU(MDApp):
         Clock.schedule_once(lambda *_: Animation(opacity=1, d=.25).start(tasklist_card), .22)
         Clock.schedule_once(lambda *_: Animation(opacity=1, d=.25).start(actions_card), .22)
 
-    # --- live clock ---
+    # ---- live clock ----
     def _format_now(self) -> str:
         return datetime.now().strftime("%a %d %b • %H:%M:%S")
 
@@ -800,7 +877,7 @@ class AppUSIU(MDApp):
             self._clock_ev.cancel()
             self._clock_ev = None
 
-    # --- action stubs ---
+    # ---- action stubs ----
     def action_manage_lecturers(self): self.notify("Open: Manage Lecturers")
     def action_manage_courses(self): self.notify("Open: Manage Courses")
     def action_manage_students(self): self.notify("Open: Manage Students")
